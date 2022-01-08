@@ -1,0 +1,6 @@
+dataset/test.txt
+dataset/train.txt
+sample
+__pycache__
+.vector_cache
+.ipynb_checkpoints
