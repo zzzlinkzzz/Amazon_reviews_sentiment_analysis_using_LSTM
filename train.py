@@ -1,27 +1,29 @@
-from torch.nn import CrossEntropyLoss
-from torch import optim, load, save, cuda
-
-from torchtext.vocab import GloVe
-from torchtext.data.utils import get_tokenizer
-
-tokenizer = get_tokenizer("basic_english")
-embedding = GloVe(name = '840B', dim = 300)
-
-from model import LSTMModel
+from model import LSTMnet
 from loader import make_dataloaders
-from validation import eval_net_loader
 
-from tqdm import tqdm
+from torch.nn import CrossEntropyLoss
+import torch, os, sys
+
+from tensorboardX import SummaryWriter
 from optparse import OptionParser
-import os,sys
-# ============================================================
-accumulation_steps = 16
-gamma=0.97
+from tqdm import tqdm
+# =======================================================
+# config
+input_dim = 300
+hidden_dim = 250
+layer_dim = 1
+output_dim = 2
+num_workers = 2
+
 dir_data = './dataset'
 dir_checkpoint = './checkpoint/'
-num_workers =  1
-is_culmulated = True
-# ============================================================
+dir_log = dir_checkpoint + 'log/'
+
+writer = SummaryWriter(dir_log)
+
+torch.manual_seed(0)
+device = ('cuda' if torch.cuda.is_available() else 'cpu')
+# =======================================================
 def get_args():
     parser = OptionParser()
     parser.add_option('-e', '--epochs', dest='epochs', default=5, type='int',
@@ -32,99 +34,120 @@ def get_args():
                       type='float', help='learning rate')
     (options, args) = parser.parse_args()
     return options
-# ============================================================
-def train_epoch(train_loader, criterion, optimizer):
+# =======================================================
+def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
     net.train()
     epoch_loss = 0
-    batch_num = len(train_loader)
-
+    
+    train_correct = 0
+    total_train = 0
+    test_correct = 0
+    total_test = 0
+    
+    print("Train session:")
     for i, batch in enumerate(tqdm(train_loader)):
-        imgs = batch['image'].to(device)
-        masks = batch['mask'].to(device)
-
-        outputs = net(imgs)
-        # probs = torch.softmax(outputs, dim=1)
-
-        loss = criterion(outputs, masks)
+        #get data
+        texts = batch['text'].to(device)
+        labels = batch['label'].to(device)
+        
+        #calculate
+        outputs = net(texts)
+        
+        #learning
+        loss = criterion(outputs, labels)
         epoch_loss += loss.detach().to('cpu').item()
         loss.backward()
-
-        if is_culmulated:
-            loss /= accumulation_steps
-            if ((i+1) % accumulation_steps == 0) or ((i+1) == batch_num):
-                optimizer.step()
-                optimizer.zero_grad()
-        else:
-            optimizer.step()
-            optimizer.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
+            
+        # predict
+        predicted = torch.argmax(torch.softmax(outputs, dim=1),dim=1)
+        
+        # validate
+        total_train += labels.size(0)
+        train_correct += (predicted == labels).sum()
     
-    print(f'Loss: {epoch_loss/i:.2f}')
-# ============================================================
-def validate_epoch(val_loader, device):
-    classIOU, meanIOU = eval_net_loader(net, val_loader, 5, device)
-    print('Class IoU:', ','.join(f'{x:.3f}' for x in classIOU))
-    print(f'Mean IoU: {meanIOU:.3f}') #  |  
-    return meanIOU
-# ============================================================
-def train_net(train_loader, val_loader, net, device, epochs = 1, batch_size = 2, eta=0.1, save_cp=True):
+    print("Test session:")
+    for i, batch in enumerate(tqdm(test_loader)):
+        #get data
+        texts = batch['text'].to(device)
+        labels = batch['label'].to(device)
+        
+        #calculate
+        outputs = net(texts)
+        
+        # predict
+        predicted = torch.argmax(torch.softmax(outputs, dim=1),dim=1)
+        
+        # validate
+        total_test += labels.size(0)
+        test_correct += (predicted == labels).sum()
+    
+    # acuracy score
+    train_accuracy = 100 * train_correct / total_train
+    test_accuracy = 100 * test_correct / total_train 
+    print(f'Loss: {epoch_loss/i:.2f}  |  Train accuracy: {train_accuracy/i:.2f}%  |  Test accuracy: {test_accuracy/i:.2f}%')
+    
+    # logging
+    writer.add_scalar('epoch_loss', epoch_loss/i, epoch+1)
+    writer.add_scalar('train_accuracy', train_accuracy, epoch+1)
+    writer.add_scalar('test_accuracy', test_accuracy, epoch+1)
+    
+    return (train_accuracy,test_accuracy)
+# =======================================================
+def train_net(train_loader, test_loader, net, epochs = 1, batch_size = 500, eta=0.1, save_cp=True):
     print(f'''
 Training params:
     Epochs: {epochs}
     Batch_size: {batch_size}
     Learning rate: {eta}
     Training size: {len(train_loader.dataset)}
-    Validation size: {len(val_loader.dataset)}
+    Test size: {len(test_loader.dataset)}
     Device: {device}
-    accumulation steps: {accumulation_steps}
-    Decreasing Learning rate by {round((1-gamma),2)*100}% per epoch
     ''')
 
-    optimizer = optim.Adam(net.parameters(),  lr= eta, weight_decay=0.1)
+    optimizer = torch.optim.SGD(net.parameters(), lr=eta)
     criterion = CrossEntropyLoss()
 
-    best_precision = 0
+    best_score = 0
 
     cp_list = [f for f in os.listdir(dir_checkpoint) if ".pth" in f]
     
     for epoch in range(len(cp_list),epochs):
-        print(f'''============================================================\nStart epoch {epoch+1}\nTraining session''')
+        print(f'''{60*"="}\nStart epoch {epoch+1}''')
         cp_list = [f for f in os.listdir(dir_checkpoint) if ".pth" in f]
         
         if len(cp_list) != 0:
             trained_model = f'CP{len(cp_list)}.pth'
-            # net = Unet_model(in_channels=3 ,n_classes=5)
-            net.load_state_dict(load(dir_checkpoint+trained_model))
+            net.load_state_dict(torch.load(dir_checkpoint+trained_model))
             net.eval()
             print('load '+ trained_model)
 
-        train_epoch(train_loader, criterion, optimizer)
-        print("Validation session")
-        precision = validate_epoch(val_loader, device)
+        score = train_epoch(epoch, train_loader, test_loader, criterion, optimizer)
+
         # scheduler.step()
         
-        if save_cp and (precision>best_precision):
+        if save_cp and (score[0]>best_score):
             state_dict = net.state_dict()
-            best_precision = precision
+            best_score = score[0]
 
-        save(state_dict, dir_checkpoint+f'CP{epoch + 1}.pth')
+        torch.save(state_dict, dir_checkpoint+f'CP{epoch + 1}.pth')
         print('Checkpoint {} saved !'.format(epoch + 1))
-# ============================================================
+# =======================================================
 if __name__ == "__main__":
-    device = ('cuda' if cuda.is_available() else 'cpu')
-    
     args = get_args()
-    
-    train_loader,test_loader = make_dataloaders(dir_data, tokenizer, embedding, 'both', args.batch_size, num_workers)
-    net = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim)
 
-    net.to(device)
+    train_loader,test_loader = make_dataloaders('./dataset', 'both', args.batch_size, num_workers)
+    
+    net = LSTMnet(input_dim, hidden_dim, layer_dim, output_dim, device).to(device)
 
     try:
-        train_net(train_loader, val_loader, net, device, epochs=args.epochs, batch_size=args.batch_size, eta=args.eta)
+        train_net(train_loader, test_loader, net, epochs = args.epochs, batch_size = args.batch_size, eta = args.eta)
     except KeyboardInterrupt:
-        save(net.state_dict(), 'INTERRUPTED.pth')
+        torch.save(net.state_dict(), 'INTERRUPTED.pth')
         print('Saved interrupt')
         try:
             sys.exit(0)
         except SystemExit:
             os._exit(0)
+# =======================================================

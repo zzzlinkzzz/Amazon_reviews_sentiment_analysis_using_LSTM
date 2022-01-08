@@ -5,7 +5,7 @@ from torch.autograd import Variable
 from math import sqrt
 
 class LSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, device, bias=True):
+    def __init__(self, input_size, hidden_size, bias=True):
         super(LSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -37,17 +37,18 @@ class LSTMCell(nn.Module):
         return (hy, cy)
 
 
-class LSTMModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, bias=True):
-        super(LSTMModel, self).__init__()
+class LSTMnet(nn.Module):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, device):
+        super(LSTMnet, self).__init__()
         self.hidden_dim = hidden_dim
         self.layer_dim = layer_dim # Number of hidden layers
         self.lstm = LSTMCell(input_dim, hidden_dim, layer_dim)  
         self.fc = nn.Linear(hidden_dim, output_dim)
+        self.device = device
      
     def forward(self, x):
-        h0 = Variable(torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)).to('cuda')
-        c0 = Variable(torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)).to('cuda')
+        h0 = Variable(torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)).to(self.device)
+        c0 = Variable(torch.zeros(self.layer_dim, x.size(0), self.hidden_dim)).to(self.device)
         outs = []
         cn = c0[0,:,:]
         hn = h0[0,:,:]
@@ -71,12 +72,12 @@ if __name__ == "__main__":
     dummy_img = torch.rand( batch_size, hidden_dim, input_dim).to('cuda')
     print(dummy_img.shape)
 
-    model = LSTMModel(input_dim, hidden_dim, layer_dim, output_dim).to('cuda')
-    outputs = model(dummy_img)
+    net = LSTMnet(input_dim, hidden_dim, layer_dim, output_dim,'cuda').to('cuda')
+    outputs = net(dummy_img)
     print('outputs: ', outputs.data)
 
     probs = torch.softmax(outputs, dim=1)
     print('probs: ', probs.data)
 
     predict = torch.argmax(probs,dim=1)
-    print('Predicted label: ', predict.numpy())
+    print('Predicted label: ', predict.cpu().numpy())

@@ -20,7 +20,7 @@ class MyDataset(Dataset):
         self._text_seg = text_seg
 
         with open(file_path, "r") as f:
-            self._total_data = len(f.readlines()) - 1
+            self._total_data = len(f.readlines())
             
         if self._text_seg == 'title':
             self._max_length = 20
