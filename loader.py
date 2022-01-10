@@ -2,16 +2,13 @@ from torch.utils.data import Dataset, DataLoader
 
 from torch import tensor
 import numpy as np
-import linecache
+import linecache, json
 
-# from autocorrect import Speller
-# spell = Speller(lang='en')
+with open('dataset/vocab.json','r') as f:
+    embedding = json.load(f)
 
-from torchtext.vocab import GloVe
 from torchtext.data.utils import get_tokenizer
-
 tokenizer = get_tokenizer("basic_english")
-embedding = GloVe(name = '840B', dim = 300)
 
 class MyDataset(Dataset):
     def __init__(self, file_path, text_seg):
@@ -48,7 +45,7 @@ class MyDataset(Dataset):
         text_mat = np.empty((300,0), float)
         for t in text:
             try:
-                text_mat = np.c_[text_mat,embedding.vectors[embedding.stoi[t]].numpy()]
+                text_mat = np.c_[text_mat,np.array(embedding[t])]
             except:
                 pass
         

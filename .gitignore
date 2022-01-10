@@ -1,7 +1,11 @@
 dataset/test.txt
 dataset/train.txt
+dataset/vocab.json
+dataset/vocab.zip
 sample
 __pycache__
 .vector_cache
 .ipynb_checkpoints
 checkpoint
+vocab_builder.ipynb
+00.tranfrom_text_to_json.ipynb
