@@ -10,7 +10,7 @@ from tqdm import tqdm
 # =======================================================
 # config
 input_dim = 300
-hidden_dim = 250
+hidden_dim = 200
 layer_dim = 1
 output_dim = 2
 num_workers = 2
@@ -32,6 +32,8 @@ def get_args():
                       type='int', help='batch size')
     parser.add_option('-l', '--learning-rate', dest='eta', default=0.1,
                       type='float', help='learning rate')
+    parser.add_option('-f', '--data-dir', dest='data_dir', default=0.1,
+                      type='str', help='dataset directory')
     (options, args) = parser.parse_args()
     return options
 # =======================================================
@@ -55,7 +57,7 @@ def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
         
         #learning
         loss = criterion(outputs, labels)
-        epoch_loss += loss.detach().to('cpu').item()
+        epoch_loss += loss.item()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -84,9 +86,9 @@ def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
         test_correct += (predicted == labels).sum()
     
     # acuracy score
-    train_accuracy = 100 * train_correct / total_train
-    test_accuracy = 100 * test_correct / total_train 
-    print(f'Loss: {epoch_loss/i:.2f}  |  Train accuracy: {train_accuracy/i:.2f}%  |  Test accuracy: {test_accuracy/i:.2f}%')
+    train_accuracy = 100 * (train_correct / total_train)
+    test_accuracy = 100 * (test_correct / total_test)
+    print(f'Loss: {epoch_loss/i:.2f}  |  Train accuracy: {train_accuracy:.2f}%  |  Test accuracy: {test_accuracy:.2f}%')
     
     # logging
     writer.add_scalar('epoch_loss', epoch_loss/i, epoch+1)
@@ -106,7 +108,7 @@ Training params:
     Device: {device}
     ''')
 
-    optimizer = torch.optim.SGD(net.parameters(), lr=eta)
+    optimizer = torch.optim.Adam(net.parameters(), lr=eta)
     criterion = CrossEntropyLoss()
 
     best_score = 0
@@ -137,7 +139,7 @@ Training params:
 if __name__ == "__main__":
     args = get_args()
 
-    train_loader,test_loader = make_dataloaders('./dataset', 'both', args.batch_size, num_workers)
+    train_loader,test_loader = make_dataloaders('./dataset', args.data_dir, 'both', args.batch_size, num_workers)
     
     net = LSTMnet(input_dim, hidden_dim, layer_dim, output_dim, device).to(device)
 
