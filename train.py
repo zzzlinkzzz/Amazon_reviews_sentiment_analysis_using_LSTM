@@ -4,10 +4,8 @@ from loader import make_dataloaders
 from torch.nn import CrossEntropyLoss
 import torch, os, sys
 
-from tensorboardX import SummaryWriter
 from optparse import OptionParser
 from tqdm import tqdm
-from linecache import getline
 from multiprocessing import cpu_count
 # =======================================================
 # config
@@ -16,16 +14,16 @@ hidden_dim = 200
 layer_dim = 1
 output_dim = 2
 num_workers = int(cpu_count()/2)
+accumulation_steps = 10
+gamma = 0.9
+is_culmulated = True
 
 dir_data = './dataset'
 dir_checkpoint = './checkpoint/'
 dir_log = dir_checkpoint + 'log/'
 
-getline('.vector_cache/glove.840B.300d.txt',0)
-
-writer = SummaryWriter(dir_log)
-
 torch.manual_seed(0)
+torch.cuda.seed(0)
 device = ('cuda' if torch.cuda.is_available() else 'cpu')
 # =======================================================
 def get_args():
@@ -44,7 +42,7 @@ def get_args():
 def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
     net.train()
     epoch_loss = 0
-    
+    batch_num = len(train_loader)
     train_correct = 0
     total_train = 0
     test_correct = 0
@@ -63,8 +61,14 @@ def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
         loss = criterion(outputs, labels)
         epoch_loss += loss.item()
         loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        if is_culmulated:
+            loss /= accumulation_steps
+            if ((i+1) % accumulation_steps == 0) or ((i+1) == batch_num):
+                optimizer.step()
+                optimizer.zero_grad()
+        else:
+            optimizer.step()
+            optimizer.zero_grad()
             
         # predict
         predicted = torch.argmax(torch.softmax(outputs, dim=1),dim=1)
@@ -92,12 +96,13 @@ def train_epoch(epoch, train_loader, test_loader, criterion, optimizer):
     # acuracy score
     train_accuracy = 100 * (train_correct / total_train)
     test_accuracy = 100 * (test_correct / total_test)
-    print(f'Loss: {epoch_loss/i:.2f}  |  Train accuracy: {train_accuracy:.2f}%  |  Test accuracy: {test_accuracy:.2f}%')
     
     # logging
-    writer.add_scalar('epoch_loss', epoch_loss/i, epoch+1)
-    writer.add_scalar('train_accuracy', train_accuracy, epoch+1)
-    writer.add_scalar('test_accuracy', test_accuracy, epoch+1)
+    log = f'Loss: {epoch_loss/i:.2f}  |  Train accuracy: {train_accuracy:.2f}%  |  Test accuracy: {test_accuracy:.2f}%'
+    print(log)
+
+    with open(dir_log + 'log.txt','a') as f:
+        f.write(log + '\n')
     
     return (train_accuracy,test_accuracy)
 # =======================================================
@@ -110,11 +115,13 @@ Training params:
     Training size: {len(train_loader.dataset)}
     Test size: {len(test_loader.dataset)}
     Device: {device}
+    Accumulation steps: {accumulation_steps}
+    Scheduler: MultiStepLR, gamma: {gamma}, 5 steps
     ''')
 
     optimizer = torch.optim.Adam(net.parameters(), lr=eta)
     criterion = CrossEntropyLoss()
-
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4,9,14,19], gamma=gamma)
     best_score = 0
 
     cp_list = [f for f in os.listdir(dir_checkpoint) if ".pth" in f]
@@ -130,12 +137,13 @@ Training params:
             print('load '+ trained_model)
 
         score = train_epoch(epoch, train_loader, test_loader, criterion, optimizer)
-
-        # scheduler.step()
         
-        if save_cp and (score[0]>best_score):
+        print(f'Current LR: {scheduler.get_last_lr()[0]:.5f}')
+        scheduler.step()
+        
+        if save_cp and (score[1]>best_score):
             state_dict = net.state_dict()
-            best_score = score[0]
+            best_score = score[1]
 
         torch.save(state_dict, dir_checkpoint+f'CP{epoch + 1}.pth')
         print('Checkpoint {} saved !'.format(epoch + 1))
@@ -143,10 +151,7 @@ Training params:
 if __name__ == "__main__":
     args = get_args()
 
-    getline(f'./dataset/{args.data_dir}/v_train.txt',0)
-    getline(f'./dataset/{args.data_dir}/v_test.txt',0)
-
-    train_loader,test_loader = make_dataloaders('./dataset', args.data_dir, 'both', args.batch_size, num_workers)
+    train_loader,test_loader = make_dataloaders('./dataset', args.data_dir, hidden_dim, args.batch_size, num_workers)
     
     net = LSTMnet(input_dim, hidden_dim, layer_dim, output_dim, device).to(device)
 

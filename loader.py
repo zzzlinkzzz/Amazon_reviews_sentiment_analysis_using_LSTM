@@ -4,12 +4,14 @@ from torch import tensor
 import numpy as np
 from linecache import getline
 
+with open('.vector_cache/glove.840B.300d.txt','r') as f:
+    embedding = f.readlines()
+
 class MyDataset(Dataset):
-    def __init__(self, file_path, text_seg):
+    def __init__(self, file_path, hidden_dim):
         self._file_path = file_path
         self._total_data = 0
-        self._text_seg = text_seg
-        self._max_length = 200
+        self._max_length = hidden_dim
 
         with open(file_path, "r") as f:
             self._total_data = len(f.readlines())
@@ -23,7 +25,7 @@ class MyDataset(Dataset):
         # embedding
         text_mat = np.empty((300,0), float)
         for t in text:
-            v = getline('.vector_cache/glove.840B.300d.txt',t+1).split(' ')[1:]
+            v = embedding[t].split(' ')[1:]
             v = np.array(list(map(float,v)))
             text_mat = np.c_[text_mat,v]
         
@@ -39,9 +41,9 @@ class MyDataset(Dataset):
     def __len__(self):
         return self._total_data
     
-def make_dataloaders(path, data_dir, text_seg, batch_size, num_workers):
-    train_dataset = MyDataset(f'{path}/{data_dir}/v_train.txt', text_seg)
-    test_dataset = MyDataset(f'{path}/{data_dir}/v_test.txt', text_seg)
+def make_dataloaders(path, data_dir, hidden_dim, batch_size, num_workers):
+    train_dataset = MyDataset(f'{path}/{data_dir}/v_train.txt', hidden_dim)
+    test_dataset = MyDataset(f'{path}/{data_dir}/v_test.txt', hidden_dim)
         
     train_loader = DataLoader(
         dataset=train_dataset, 
