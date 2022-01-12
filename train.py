@@ -7,17 +7,21 @@ import torch, os, sys
 from tensorboardX import SummaryWriter
 from optparse import OptionParser
 from tqdm import tqdm
+from linecache import getline
+from multiprocessing import cpu_count
 # =======================================================
 # config
 input_dim = 300
 hidden_dim = 200
 layer_dim = 1
 output_dim = 2
-num_workers = 2
+num_workers = int(cpu_count()/2)
 
 dir_data = './dataset'
 dir_checkpoint = './checkpoint/'
 dir_log = dir_checkpoint + 'log/'
+
+getline('.vector_cache/glove.840B.300d.txt',0)
 
 writer = SummaryWriter(dir_log)
 
@@ -138,6 +142,9 @@ Training params:
 # =======================================================
 if __name__ == "__main__":
     args = get_args()
+
+    getline(f'./dataset/{args.data_dir}/v_train.txt',0)
+    getline(f'./dataset/{args.data_dir}/v_test.txt',0)
 
     train_loader,test_loader = make_dataloaders('./dataset', args.data_dir, 'both', args.batch_size, num_workers)
     
